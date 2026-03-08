@@ -1,36 +1,128 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# CC0MON 1-BIT
+
+A mobile-friendly pixel tool for **CC0MON** built with **Next.js**.
+
+It lets you load any CC0MON token, convert it into a clean two-color pixel output, and customize it with:
+
+- Threshold
+- Bayer dithering
+- Invert
+- Adjustable frame
+- Grid-snapped sticker placement
+- Sticker editor with transparent / dark / light pixels
+- Clean pixel-perfect PNG export
+
+## CC0
+
+This project is made in the spirit of **CC0** and remix culture.
+
+Built with love for onchain pixel art, open experiments, and playful tooling.
+
+## Links
+
+- Creator: [0xfitler8 on X](https://x.com/0xfilter8)
+- CC0MON: [@cc0_mon on X](https://x.com/cc0_mon)
+- CC0MON API: [api.cc0mon.com](https://api.cc0mon.com/)
+- Next.js: [nextjs.org](https://nextjs.org)
+
+## Features
+
+- Load a random CC0MON token
+- Load a specific token by ID
+- Convert the artwork into a two-color bitmap
+- Use the **Normies** palette:
+  - Dark: `#48494b`
+  - Light: `#e3e5e4`
+- Add a frame around the artwork
+- Create custom stickers directly in the browser
+- Place stickers on the artwork with grid-perfect positioning
+- Export a clean PNG with integer scaling
+- Mobile-friendly app layout
+
+## Tech Stack
+
+- [Next.js](https://nextjs.org)
+- React
+- TypeScript
+- App Router
+- `next/font` with **Silkscreen**
 
 ## Getting Started
 
-First, run the development server:
+Install dependencies:
+
+```bash
+npm install
+```
+
+Run the development server:
 
 ```bash
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open [http://localhost:3000](http://localhost:3000) in your browser.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Build
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+Create a production build:
 
-## Learn More
+```bash
+npm run build
+```
 
-To learn more about Next.js, take a look at the following resources:
+Start the production server:
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+```bash
+npm run start
+```
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## Project Notes
 
-## Deploy on Vercel
+The app fetches token metadata from the CC0MON API and renders the embedded image locally on a pixel grid.
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+Stickers are edited as JSON bitmap data where:
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- `0` = transparent
+- `1` = dark pixel
+- `2` = light pixel
+
+This keeps placement and export pixel-perfect.
+
+## Sticker Format
+
+Example sticker JSON:
+
+```json
+{
+  "width": 8,
+  "height": 5,
+  "pixels": [
+    "00000000",
+    "01100110",
+    "01222100",
+    "01011100",
+    "01100110"
+  ]
+}
+```
+
+## Deploy
+
+You can deploy this app on platforms like:
+
+- [Vercel](https://vercel.com/)
+- Netlify
+- Railway
+
+For Vercel, the easiest path is:
+
+1. Push the repo to GitHub
+2. Import it into Vercel
+3. Deploy
+
+## Credits
+
+Tool by [0xfitler8](https://x.com/0xfilter8)
+
+Inspired by **CC0MON** and open pixel culture.

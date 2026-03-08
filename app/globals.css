@@ -1,26 +1,69 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --pixel-on: #48494b;
+  --pixel-off: #e3e5e4;
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
-}
-
+html,
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background: var(--pixel-off);
+  color: var(--pixel-on);
+  font-family: var(--font-silkscreen), monospace;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+input[type="number"] {
+  border-radius: 0;
+}
+
+input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 14px;
+  background: var(--pixel-off);
+  border: 1px solid var(--pixel-on);
+  border-radius: 0;
+  outline: none;
+}
+
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 12px;
+  height: 20px;
+  background: var(--pixel-on);
+  border: 1px solid var(--pixel-on);
+  border-radius: 0;
+  cursor: pointer;
+}
+
+input[type="range"]::-moz-range-thumb {
+  width: 12px;
+  height: 20px;
+  background: var(--pixel-on);
+  border: 1px solid var(--pixel-on);
+  border-radius: 0;
+  cursor: pointer;
+}
+
+input[type="range"]::-moz-range-track {
+  height: 14px;
+  background: var(--pixel-off);
+  border: 1px solid var(--pixel-on);
+  border-radius: 0;
+}
+
+.pixel-checkbox {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--pixel-on);
+}
+
+a {
+  color: inherit;
 }
