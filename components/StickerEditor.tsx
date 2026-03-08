@@ -122,18 +122,22 @@ export default function StickerEditor({
     }
   }, [grid, width, height, cellSize]);
 
-  function getCellFromPointer(clientX: number, clientY: number) {
-    const canvas = canvasRef.current;
-    if (!canvas) return null;
+function getCellFromPointer(clientX: number, clientY: number) {
+  const canvas = canvasRef.current;
+  if (!canvas) return null;
 
-    const rect = canvas.getBoundingClientRect();
-    const x = Math.floor((clientX - rect.left) / cellSize);
-    const y = Math.floor((clientY - rect.top) / cellSize);
+  const rect = canvas.getBoundingClientRect();
 
-    if (x < 0 || y < 0 || x >= width || y >= height) return null;
+  const relativeX = (clientX - rect.left) / rect.width;
+  const relativeY = (clientY - rect.top) / rect.height;
 
-    return { x, y };
-  }
+  const x = Math.floor(relativeX * width);
+  const y = Math.floor(relativeY * height);
+
+  if (x < 0 || y < 0 || x >= width || y >= height) return null;
+
+  return { x, y };
+}
 
   function paintStart(clientX: number, clientY: number) {
     const cell = getCellFromPointer(clientX, clientY);
