@@ -5,12 +5,15 @@ import { useEffect, useMemo, useRef, useState } from "react";
 const PIXEL_DARK_HEX = "#48494b";
 const PIXEL_LIGHT_HEX = "#e3e5e4";
 const PREVIEW_BG_HEX = "#ffffff";
+const GRID_LINE_HEX = "#48494b";
 
 type Props = {
   initialWidth?: number;
   initialHeight?: number;
   onExport?: (json: string) => void;
 };
+
+type Tool = 0 | 1 | 2;
 
 function makeGrid(width: number, height: number) {
   return Array.from({ length: height }, () => Array(width).fill(0));
@@ -33,6 +36,10 @@ function resizeGrid(
   return next;
 }
 
+function clamp(value: number, min: number, max: number) {
+  return Math.max(min, Math.min(max, value));
+}
+
 export default function StickerEditor({
   initialWidth = 8,
   initialHeight = 8,
@@ -43,21 +50,15 @@ export default function StickerEditor({
   const [baseGrid, setBaseGrid] = useState<number[][]>(() =>
     makeGrid(initialWidth, initialHeight)
   );
-  const [drawValue, setDrawValue] = useState<1 | 2>(1);
+  const [tool, setTool] = useState<Tool>(1);
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const wrapRef = useRef<HTMLDivElement>(null);
   const isDrawingRef = useRef(false);
   const dragPaintValueRef = useRef<0 | 1 | 2>(1);
+  const pointerIdRef = useRef<number | null>(null);
 
-  const cellSize = useMemo(() => {
-    const longestSide = Math.max(width, height);
-
-    if (longestSide <= 8) return 24;
-    if (longestSide <= 12) return 20;
-    if (longestSide <= 16) return 16;
-    if (longestSide <= 24) return 12;
-    return 10;
-  }, [width, height]);
+  const [cssCellSize, setCssCellSize] = useState(24);
 
   const grid = useMemo(() => {
     return resizeGrid(baseGrid, width, height);
@@ -80,6 +81,29 @@ export default function StickerEditor({
   }, [exportedJson, onExport]);
 
   useEffect(() => {
+    function updateCellSize() {
+      const wrap = wrapRef.current;
+      if (!wrap) return;
+
+      const availableWidth = Math.max(180, wrap.clientWidth - 16);
+      const availableHeight = Math.min(window.innerHeight * 0.45, 420);
+
+      const nextFromWidth = Math.floor(availableWidth / width);
+      const nextFromHeight = Math.floor(availableHeight / height);
+      const next = clamp(Math.min(nextFromWidth, nextFromHeight), 10, 32);
+
+      setCssCellSize(next);
+    }
+
+    updateCellSize();
+    window.addEventListener("resize", updateCellSize);
+
+    return () => {
+      window.removeEventListener("resize", updateCellSize);
+    };
+  }, [width, height]);
+
+  useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
 
@@ -87,11 +111,11 @@ export default function StickerEditor({
     const actualWidth = Math.max(0, ...grid.map((row) => row.length), width);
 
     const dpr = window.devicePixelRatio || 1;
-    const cssWidth = Math.max(1, actualWidth * cellSize);
-    const cssHeight = Math.max(1, actualHeight * cellSize);
+    const cssWidth = Math.max(1, actualWidth * cssCellSize);
+    const cssHeight = Math.max(1, actualHeight * cssCellSize);
 
-    canvas.width = cssWidth * dpr;
-    canvas.height = cssHeight * dpr;
+    canvas.width = Math.floor(cssWidth * dpr);
+    canvas.height = Math.floor(cssHeight * dpr);
     canvas.style.width = `${cssWidth}px`;
     canvas.style.height = `${cssHeight}px`;
 
@@ -109,60 +133,73 @@ export default function StickerEditor({
 
         if (value === 1) {
           ctx.fillStyle = PIXEL_DARK_HEX;
-          ctx.fillRect(x * cellSize, y * cellSize, cellSize, cellSize);
+          ctx.fillRect(
+            x * cssCellSize,
+            y * cssCellSize,
+            cssCellSize,
+            cssCellSize
+          );
         } else if (value === 2) {
           ctx.fillStyle = PIXEL_LIGHT_HEX;
-          ctx.fillRect(x * cellSize, y * cellSize, cellSize, cellSize);
+          ctx.fillRect(
+            x * cssCellSize,
+            y * cssCellSize,
+            cssCellSize,
+            cssCellSize
+          );
         }
 
-        ctx.strokeStyle = PIXEL_DARK_HEX;
+        ctx.strokeStyle = GRID_LINE_HEX;
         ctx.lineWidth = 1;
-        ctx.strokeRect(x * cellSize, y * cellSize, cellSize, cellSize);
+        ctx.strokeRect(
+          x * cssCellSize,
+          y * cssCellSize,
+          cssCellSize,
+          cssCellSize
+        );
       }
     }
-  }, [grid, width, height, cellSize]);
+  }, [grid, width, height, cssCellSize]);
 
-function getCellFromPointer(clientX: number, clientY: number) {
-  const canvas = canvasRef.current;
-  if (!canvas) return null;
+  function getCellFromPointer(clientX: number, clientY: number) {
+    const canvas = canvasRef.current;
+    if (!canvas) return null;
 
-  const rect = canvas.getBoundingClientRect();
+    const rect = canvas.getBoundingClientRect();
 
-  const relativeX = (clientX - rect.left) / rect.width;
-  const relativeY = (clientY - rect.top) / rect.height;
+    const relativeX = (clientX - rect.left) / rect.width;
+    const relativeY = (clientY - rect.top) / rect.height;
 
-  const x = Math.floor(relativeX * width);
-  const y = Math.floor(relativeY * height);
+    const x = Math.floor(relativeX * width);
+    const y = Math.floor(relativeY * height);
 
-  if (x < 0 || y < 0 || x >= width || y >= height) return null;
+    if (x < 0 || y < 0 || x >= width || y >= height) return null;
 
-  return { x, y };
-}
+    return { x, y };
+  }
+
+  function paintCell(x: number, y: number, value: 0 | 1 | 2) {
+    setBaseGrid((prev) => {
+      const next = resizeGrid(prev, width, height);
+      next[y][x] = value;
+      return next;
+    });
+  }
 
   function paintStart(clientX: number, clientY: number) {
     const cell = getCellFromPointer(clientX, clientY);
     if (!cell) return;
 
-    setBaseGrid((prev) => {
-      const next = resizeGrid(prev, width, height);
-      const current = next[cell.y][cell.x] ?? 0;
-      const nextValue: 0 | 1 | 2 = current === drawValue ? 0 : drawValue;
-
-      dragPaintValueRef.current = nextValue;
-      next[cell.y][cell.x] = nextValue;
-      return next;
-    });
+    const nextValue: 0 | 1 | 2 = tool;
+    dragPaintValueRef.current = nextValue;
+    paintCell(cell.x, cell.y, nextValue);
   }
 
   function dragPaint(clientX: number, clientY: number) {
     const cell = getCellFromPointer(clientX, clientY);
     if (!cell) return;
 
-    setBaseGrid((prev) => {
-      const next = resizeGrid(prev, width, height);
-      next[cell.y][cell.x] = dragPaintValueRef.current;
-      return next;
-    });
+    paintCell(cell.x, cell.y, dragPaintValueRef.current);
   }
 
   function clearAll() {
@@ -189,6 +226,7 @@ function getCellFromPointer(clientX: number, clientY: number) {
           value={width}
           onChange={(e) => setWidth(Math.max(1, Number(e.target.value) || 1))}
           className="border bg-[#e3e5e4] px-2 py-2 text-xs outline-none"
+          aria-label="Width"
         />
         <input
           type="number"
@@ -197,22 +235,46 @@ function getCellFromPointer(clientX: number, clientY: number) {
           value={height}
           onChange={(e) => setHeight(Math.max(1, Number(e.target.value) || 1))}
           className="border bg-[#e3e5e4] px-2 py-2 text-xs outline-none"
+          aria-label="Height"
         />
       </div>
 
-      <div className="mb-3 grid grid-cols-2 gap-2">
+      <div className="mb-3 grid grid-cols-3 gap-2">
         <button
-          onClick={() => setDrawValue(1)}
-          className="border bg-[#48494b] px-3 py-2 text-xs text-[#e3e5e4]"
+          onClick={() => setTool(1)}
+          className={`border px-3 py-2 text-xs ${
+            tool === 1
+              ? "bg-[#48494b] text-[#e3e5e4]"
+              : "bg-[#e3e5e4] text-[#48494b]"
+          }`}
         >
           DARK
         </button>
+
         <button
-          onClick={() => setDrawValue(2)}
-          className="border bg-[#48494b] px-3 py-2 text-xs text-[#e3e5e4]"
+          onClick={() => setTool(2)}
+          className={`border px-3 py-2 text-xs ${
+            tool === 2
+              ? "bg-[#48494b] text-[#e3e5e4]"
+              : "bg-[#e3e5e4] text-[#48494b]"
+          }`}
         >
           LIGHT
         </button>
+
+        <button
+          onClick={() => setTool(0)}
+          className={`border px-3 py-2 text-xs ${
+            tool === 0
+              ? "bg-[#48494b] text-[#e3e5e4]"
+              : "bg-[#e3e5e4] text-[#48494b]"
+          }`}
+        >
+          ERASER
+        </button>
+      </div>
+
+      <div className="mb-3 grid grid-cols-2 gap-2">
         <button
           onClick={clearAll}
           className="border bg-[#48494b] px-3 py-2 text-xs text-[#e3e5e4]"
@@ -227,47 +289,45 @@ function getCellFromPointer(clientX: number, clientY: number) {
         </button>
       </div>
 
-      <div className="mb-3 overflow-auto border bg-white p-2">
+      <div ref={wrapRef} className="mb-3 overflow-auto border bg-white p-2">
         <canvas
           ref={canvasRef}
-          onMouseDown={(e) => {
+          onPointerDown={(e) => {
+            e.preventDefault();
             isDrawingRef.current = true;
+            pointerIdRef.current = e.pointerId;
+            e.currentTarget.setPointerCapture(e.pointerId);
             paintStart(e.clientX, e.clientY);
           }}
-          onMouseMove={(e) => {
+          onPointerMove={(e) => {
             if (!isDrawingRef.current) return;
+            if (pointerIdRef.current !== e.pointerId) return;
+            e.preventDefault();
             dragPaint(e.clientX, e.clientY);
           }}
-          onMouseUp={() => {
+          onPointerUp={(e) => {
             isDrawingRef.current = false;
+            pointerIdRef.current = null;
+            if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+              e.currentTarget.releasePointerCapture(e.pointerId);
+            }
           }}
-          onMouseLeave={() => {
+          onPointerCancel={() => {
             isDrawingRef.current = false;
-          }}
-          onTouchStart={(e) => {
-            isDrawingRef.current = true;
-            const touch = e.touches[0];
-            if (touch) paintStart(touch.clientX, touch.clientY);
-          }}
-          onTouchMove={(e) => {
-            if (!isDrawingRef.current) return;
-            const touch = e.touches[0];
-            if (touch) dragPaint(touch.clientX, touch.clientY);
-          }}
-          onTouchEnd={() => {
-            isDrawingRef.current = false;
+            pointerIdRef.current = null;
           }}
           style={{
             imageRendering: "pixelated",
             display: "block",
             touchAction: "none",
             maxWidth: "100%",
+            margin: "0 auto",
           }}
         />
       </div>
 
       <div className="text-xs">
-        CLICK PAINTS THE SELECTED COLOR. CLICKING THE SAME COLOR AGAIN ERASES IT.
+        TOOL: {tool === 1 ? "DARK" : tool === 2 ? "LIGHT" : "ERASER"}
       </div>
     </div>
   );

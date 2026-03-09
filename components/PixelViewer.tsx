@@ -445,7 +445,12 @@ export default function PixelViewer() {
       if (!wrap || !current) return;
 
       const natural = current.size * MAX_PREVIEW_SCALE;
-      const available = Math.max(180, Math.floor(wrap.clientWidth - 8));
+      const mobileMax = Math.min(window.innerWidth - 32, 420);
+      const available = Math.max(
+        180,
+        Math.floor(Math.min(wrap.clientWidth - 8, mobileMax))
+      );
+
       setPreviewCssSize(Math.min(natural, available));
     }
 
@@ -654,20 +659,14 @@ export default function PixelViewer() {
           >
             <canvas
               ref={previewCanvasRef}
-              onMouseDown={(e) =>
-                updateStickerFromPointer(e.clientX, e.clientY)
-              }
-              onMouseMove={(e) => {
-                if (e.buttons !== 1) return;
+              onPointerDown={(e) => {
+                e.preventDefault();
                 updateStickerFromPointer(e.clientX, e.clientY);
               }}
-              onTouchStart={(e) => {
-                const touch = e.touches[0];
-                if (touch) updateStickerFromPointer(touch.clientX, touch.clientY);
-              }}
-              onTouchMove={(e) => {
-                const touch = e.touches[0];
-                if (touch) updateStickerFromPointer(touch.clientX, touch.clientY);
+              onPointerMove={(e) => {
+                if ((e.buttons & 1) !== 1) return;
+                e.preventDefault();
+                updateStickerFromPointer(e.clientX, e.clientY);
               }}
               className="border"
               style={{
@@ -685,7 +684,7 @@ export default function PixelViewer() {
           </div>
         </div>
 
-        <div className="order-3 space-y-4">
+        <div className="order-3 space-y-4 lg:max-w-[320px]">
           <StickerEditor
             initialWidth={8}
             initialHeight={5}
