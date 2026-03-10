@@ -5,26 +5,17 @@ import { decodeSvgDataUri } from "@/lib/svg-utils";
 import StickerEditor from "@/components/StickerEditor";
 
 const TOTAL_TOKENS = 10000;
-
 const TARGET_EXPORT_SIZE = 720;
 const SOURCE_SIZE = 36;
 const MAX_FRAME = 12;
 const MAX_PREVIEW_SCALE = 10;
 
-const PALETTES = {
-  normie: {
-    name: "Normie",
-    on: "#48494b",
-    off: "#e3e5e4",
-  },
-  eth: {
-    name: "Eth",
-    on: "#5c6fa8",
-    off: "#e3e5e4",
-  },
+const THEMES = {
+  normie: { name: "Normie" },
+  eth: { name: "Eth" },
 } as const;
 
-type PaletteKey = keyof typeof PALETTES;
+type ThemeKey = keyof typeof THEMES;
 
 type StickerData = {
   width: number;
@@ -57,6 +48,22 @@ function getLuminance(r: number, g: number, b: number) {
 function extractEmbeddedPng(svg: string) {
   const pngMatch = svg.match(/href="(data:image\/png;base64,[^"]+)"/i);
   return pngMatch?.[1] ?? null;
+}
+
+function getThemeColors() {
+  if (typeof window === "undefined") {
+    return {
+      on: "#48494b",
+      off: "#e3e5e4",
+    };
+  }
+
+  const styles = getComputedStyle(document.documentElement);
+
+  return {
+    on: styles.getPropertyValue("--pixel-on").trim() || "#48494b",
+    off: styles.getPropertyValue("--pixel-off").trim() || "#e3e5e4",
+  };
 }
 
 function applyThresholdTo36x36(
@@ -145,11 +152,10 @@ function drawBitmap(
   ctx: CanvasRenderingContext2D,
   bits: Uint8Array,
   bitmapSize: number,
-  canvasSize: number,
-  palette: PaletteKey
+  canvasSize: number
 ) {
   const scale = canvasSize / bitmapSize;
-  const colors = PALETTES[palette];
+  const colors = getThemeColors();
 
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.clearRect(0, 0, canvasSize, canvasSize);
@@ -250,9 +256,6 @@ function parseStickerJson(text: string): StickerData | null {
   }
 }
 
-// 0 transparent
-// 1 dark overlay normally, light overlay when invert is on
-// 2 light overlay normally, dark overlay when invert is on
 function applySticker(
   baseBits: Uint8Array,
   baseSize: number,
@@ -307,7 +310,7 @@ export default function PixelViewer() {
   const [bayer, setBayer] = useState(0);
   const [invert, setInvert] = useState(false);
   const [frame, setFrame] = useState(4);
-  const [palette, setPalette] = useState<PaletteKey>("normie");
+  const [theme, setTheme] = useState<ThemeKey>("normie");
 
   const [embeddedPng, setEmbeddedPng] = useState<string | null>(null);
   const [baseRendered, setBaseRendered] = useState<{
@@ -332,6 +335,27 @@ export default function PixelViewer() {
   const [stickerX, setStickerX] = useState(0);
   const [stickerY, setStickerY] = useState(0);
 
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+  }, [theme]);
+
+  const panelStyle: React.CSSProperties = {
+    backgroundColor: "var(--pixel-surface)",
+    color: "var(--pixel-on)",
+    borderColor: "var(--pixel-border)",
+  };
+
+  const buttonStyle: React.CSSProperties = {
+    backgroundColor: "var(--pixel-on)",
+    color: "var(--pixel-off)",
+    borderColor: "var(--pixel-border)",
+  };
+
+  const previewFrameStyle: React.CSSProperties = {
+    backgroundColor: "var(--pixel-off)",
+    borderColor: "var(--pixel-border)",
+  };
+
   const parsedSticker = useMemo(
     () => parseStickerJson(stickerJson),
     [stickerJson]
@@ -339,6 +363,7 @@ export default function PixelViewer() {
 
   const rendered = useMemo(() => {
     if (!baseRendered) return null;
+
     return {
       size: baseRendered.size,
       bits: applySticker(
@@ -395,6 +420,7 @@ export default function PixelViewer() {
 
   function handleLoadSpecificToken() {
     const parsed = Number(tokenInput);
+
     if (!Number.isInteger(parsed) || parsed < 1 || parsed > TOTAL_TOKENS) {
       setError(`Token ID must be between 1 and ${TOTAL_TOKENS}`);
       return;
@@ -490,8 +516,8 @@ export default function PixelViewer() {
     canvas.height = internalSize;
 
     ctx.imageSmoothingEnabled = false;
-    drawBitmap(ctx, rendered.bits, rendered.size, internalSize, palette);
-  }, [rendered, palette]);
+    drawBitmap(ctx, rendered.bits, rendered.size, internalSize);
+  }, [rendered, theme]);
 
   function updateStickerFromPointer(clientX: number, clientY: number) {
     if (!previewCanvasRef.current || !rendered || !parsedSticker) return;
@@ -519,12 +545,12 @@ export default function PixelViewer() {
     canvas.height = exportSize;
 
     ctx.imageSmoothingEnabled = false;
-    drawBitmap(ctx, rendered.bits, rendered.size, exportSize, palette);
+    drawBitmap(ctx, rendered.bits, rendered.size, exportSize);
 
     const url = canvas.toDataURL("image/png");
     const a = document.createElement("a");
     a.href = url;
-    a.download = `cc0mon-${tokenId}-${palette}${
+    a.download = `cc0mon-${tokenId}-${theme}${
       invert ? "-inverse" : ""
     }-${exportSize}x${exportSize}.png`;
     a.click();
@@ -533,9 +559,9 @@ export default function PixelViewer() {
   return (
     <div className="mx-auto max-w-6xl">
       <div className="grid gap-4 lg:grid-cols-[280px_minmax(0,1fr)_320px]">
-        <div className="order-2 border bg-[#e3e5e4] p-3 lg:order-1">
+        <div className="order-2 border p-3 lg:order-1" style={panelStyle}>
           <div className="space-y-3">
-            <div className="border bg-[#e3e5e4] p-2">
+            <div className="border p-2" style={panelStyle}>
               <label className="mb-2 block text-xs">TOKEN ID</label>
               <div className="flex gap-2">
                 <input
@@ -544,12 +570,13 @@ export default function PixelViewer() {
                   max={TOTAL_TOKENS}
                   value={tokenInput}
                   onChange={(e) => setTokenInput(e.target.value)}
-                  className="min-w-0 flex-1 border bg-[#e3e5e4] px-2 py-2 text-sm outline-none"
+                  className="min-w-0 flex-1 px-2 py-2 text-sm outline-none"
                 />
                 <button
                   onClick={handleLoadSpecificToken}
                   disabled={loading}
-                  className="border bg-[#48494b] px-3 py-2 text-xs text-[#e3e5e4] disabled:opacity-50"
+                  className="border px-3 py-2 text-xs disabled:opacity-50"
+                  style={buttonStyle}
                 >
                   LOAD
                 </button>
@@ -560,7 +587,8 @@ export default function PixelViewer() {
               <button
                 onClick={() => void loadToken()}
                 disabled={loading}
-                className="border bg-[#48494b] px-3 py-3 text-xs text-[#e3e5e4] disabled:opacity-50"
+                className="border px-3 py-3 text-xs disabled:opacity-50"
+                style={buttonStyle}
               >
                 {loading ? "..." : "RANDOMIZE"}
               </button>
@@ -568,14 +596,15 @@ export default function PixelViewer() {
               <button
                 onClick={exportPng}
                 disabled={!rendered}
-                className="border bg-[#48494b] px-3 py-3 text-xs text-[#e3e5e4] disabled:opacity-50"
+                className="border px-3 py-3 text-xs disabled:opacity-50"
+                style={buttonStyle}
               >
                 EXPORT
               </button>
             </div>
 
-            <div className="border bg-[#e3e5e4] p-2 text-xs">
-              <div>CURRENT TOKEN #{tokenId ?? "-"}</div>
+            <div className="border p-2 text-xs" style={panelStyle}>
+              CURRENT TOKEN #{tokenId ?? "-"}
             </div>
 
             <label className="block space-y-2">
@@ -615,7 +644,10 @@ export default function PixelViewer() {
             </label>
 
             <div className="grid grid-cols-2 gap-2">
-              <label className="flex items-center gap-3 border bg-[#e3e5e4] p-2 text-xs">
+              <label
+                className="flex items-center gap-3 border p-2 text-xs"
+                style={panelStyle}
+              >
                 <input
                   type="checkbox"
                   checked={invert}
@@ -627,11 +659,12 @@ export default function PixelViewer() {
 
               <button
                 onClick={() =>
-                  setPalette((prev) => (prev === "normie" ? "eth" : "normie"))
+                  setTheme((prev) => (prev === "normie" ? "eth" : "normie"))
                 }
-                className="border bg-[#48494b] px-3 py-2 text-xs text-[#e3e5e4]"
+                className="border px-3 py-2 text-xs"
+                style={buttonStyle}
               >
-                PALETTE: {palette === "normie" ? "NORMIE" : "ETH"}
+                THEME: {theme === "normie" ? "NORMIE" : "ETH"}
               </button>
             </div>
 
@@ -672,15 +705,18 @@ export default function PixelViewer() {
             )}
 
             {error && (
-              <div className="border bg-[#e3e5e4] p-2 text-xs">{error}</div>
+              <div className="border p-2 text-xs" style={panelStyle}>
+                {error}
+              </div>
             )}
           </div>
         </div>
 
-        <div className="order-1 border bg-[#e3e5e4] p-3 lg:order-2">
+        <div className="order-1 border p-3 lg:order-2" style={panelStyle}>
           <div className="mb-3 text-center text-sm">
-            PREVIEW · {PALETTES[palette].name}
+            PREVIEW · {THEMES[theme].name}
           </div>
+
           <div
             ref={previewWrapRef}
             className="flex w-full items-center justify-center overflow-hidden"
@@ -698,12 +734,12 @@ export default function PixelViewer() {
               }}
               className="border"
               style={{
+                ...previewFrameStyle,
                 width: `${previewCssSize}px`,
                 height: `${previewCssSize}px`,
                 maxWidth: "100%",
                 aspectRatio: "1 / 1",
                 imageRendering: "pixelated",
-                backgroundColor: PALETTES[palette].off,
                 display: "block",
                 touchAction: "none",
                 cursor: parsedSticker ? "grab" : "default",
@@ -716,7 +752,7 @@ export default function PixelViewer() {
           <StickerEditor
             initialWidth={8}
             initialHeight={5}
-            palette={palette}
+            theme={theme}
             onExport={(json) => setStickerJson(json)}
           />
         </div>

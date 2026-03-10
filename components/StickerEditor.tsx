@@ -2,31 +2,15 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 
-const PIXEL_LIGHT_HEX = "#e3e5e4";
-const PREVIEW_BG_HEX = "#ffffff";
-const GRID_LINE_HEX = "#48494b";
-
-const PALETTES = {
-  normie: {
-    name: "Normie",
-    dark: "#48494b",
-  },
-  eth: {
-    name: "Eth",
-    dark: "#5c6fa8",
-  },
-} as const;
-
-type PaletteKey = keyof typeof PALETTES;
+type ThemeKey = "normie" | "eth";
+type Tool = 0 | 1 | 2;
 
 type Props = {
   initialWidth?: number;
   initialHeight?: number;
-  palette: PaletteKey;
+  theme: ThemeKey;
   onExport?: (json: string) => void;
 };
-
-type Tool = 0 | 1 | 2;
 
 function makeGrid(width: number, height: number) {
   return Array.from({ length: height }, () => Array(width).fill(0));
@@ -53,10 +37,31 @@ function clamp(value: number, min: number, max: number) {
   return Math.max(min, Math.min(max, value));
 }
 
+function getThemeColors() {
+  if (typeof window === "undefined") {
+    return {
+      on: "#48494b",
+      off: "#e3e5e4",
+      border: "#48494b",
+      editorBg: "#ffffff",
+    };
+  }
+
+  const styles = getComputedStyle(document.documentElement);
+
+  return {
+    on: styles.getPropertyValue("--pixel-on").trim() || "#48494b",
+    off: styles.getPropertyValue("--pixel-off").trim() || "#e3e5e4",
+    border: styles.getPropertyValue("--pixel-border").trim() || "#48494b",
+    editorBg:
+      styles.getPropertyValue("--pixel-editor-bg").trim() || "#ffffff",
+  };
+}
+
 export default function StickerEditor({
   initialWidth = 8,
   initialHeight = 8,
-  palette,
+  theme,
   onExport,
 }: Props) {
   const [width, setWidth] = useState(initialWidth);
@@ -74,7 +79,28 @@ export default function StickerEditor({
 
   const [cssCellSize, setCssCellSize] = useState(24);
 
-  const activePalette = PALETTES[palette];
+  const panelStyle: React.CSSProperties = {
+    backgroundColor: "var(--pixel-surface)",
+    color: "var(--pixel-on)",
+    borderColor: "var(--pixel-border)",
+  };
+
+  const activeButtonStyle: React.CSSProperties = {
+    backgroundColor: "var(--pixel-on)",
+    color: "var(--pixel-off)",
+    borderColor: "var(--pixel-border)",
+  };
+
+  const inactiveButtonStyle: React.CSSProperties = {
+    backgroundColor: "var(--pixel-surface)",
+    color: "var(--pixel-on)",
+    borderColor: "var(--pixel-border)",
+  };
+
+  const editorWrapStyle: React.CSSProperties = {
+    backgroundColor: "var(--pixel-editor-bg)",
+    borderColor: "var(--pixel-border)",
+  };
 
   const grid = useMemo(() => {
     return resizeGrid(baseGrid, width, height);
@@ -138,9 +164,11 @@ export default function StickerEditor({
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
+    const colors = getThemeColors();
+
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, cssWidth, cssHeight);
-    ctx.fillStyle = PREVIEW_BG_HEX;
+    ctx.fillStyle = colors.editorBg;
     ctx.fillRect(0, 0, cssWidth, cssHeight);
 
     for (let y = 0; y < actualHeight; y++) {
@@ -148,7 +176,7 @@ export default function StickerEditor({
         const value = grid[y]?.[x] ?? 0;
 
         if (value === 1) {
-          ctx.fillStyle = activePalette.dark;
+          ctx.fillStyle = colors.on;
           ctx.fillRect(
             x * cssCellSize,
             y * cssCellSize,
@@ -156,7 +184,7 @@ export default function StickerEditor({
             cssCellSize
           );
         } else if (value === 2) {
-          ctx.fillStyle = PIXEL_LIGHT_HEX;
+          ctx.fillStyle = colors.off;
           ctx.fillRect(
             x * cssCellSize,
             y * cssCellSize,
@@ -165,7 +193,7 @@ export default function StickerEditor({
           );
         }
 
-        ctx.strokeStyle = GRID_LINE_HEX;
+        ctx.strokeStyle = colors.border;
         ctx.lineWidth = 1;
         ctx.strokeRect(
           x * cssCellSize,
@@ -175,7 +203,7 @@ export default function StickerEditor({
         );
       }
     }
-  }, [grid, width, height, cssCellSize, activePalette]);
+  }, [grid, width, height, cssCellSize, theme]);
 
   function getCellFromPointer(clientX: number, clientY: number) {
     const canvas = canvasRef.current;
@@ -230,10 +258,12 @@ export default function StickerEditor({
   }
 
   return (
-    <div className="border bg-[#e3e5e4] p-3">
+    <div className="border p-3" style={panelStyle}>
       <div className="mb-3 text-sm">STICKER EDITOR</div>
 
-      <div className="mb-2 text-xs">PALETTE: {activePalette.name}</div>
+      <div className="mb-2 text-xs">
+        THEME: {theme === "normie" ? "Normie" : "Eth"}
+      </div>
 
       <div className="mb-3 grid gap-2 sm:grid-cols-2">
         <input
@@ -242,7 +272,7 @@ export default function StickerEditor({
           max={32}
           value={width}
           onChange={(e) => setWidth(Math.max(1, Number(e.target.value) || 1))}
-          className="border bg-[#e3e5e4] px-2 py-2 text-xs outline-none"
+          className="px-2 py-2 text-xs outline-none"
           aria-label="Width"
         />
         <input
@@ -251,7 +281,7 @@ export default function StickerEditor({
           max={32}
           value={height}
           onChange={(e) => setHeight(Math.max(1, Number(e.target.value) || 1))}
-          className="border bg-[#e3e5e4] px-2 py-2 text-xs outline-none"
+          className="px-2 py-2 text-xs outline-none"
           aria-label="Height"
         />
       </div>
@@ -259,33 +289,24 @@ export default function StickerEditor({
       <div className="mb-3 grid grid-cols-3 gap-2">
         <button
           onClick={() => setTool(1)}
-          className={`border px-3 py-2 text-xs ${
-            tool === 1
-              ? "bg-[#48494b] text-[#e3e5e4]"
-              : "bg-[#e3e5e4] text-[#48494b]"
-          }`}
+          className="border px-3 py-2 text-xs"
+          style={tool === 1 ? activeButtonStyle : inactiveButtonStyle}
         >
           DARK
         </button>
 
         <button
           onClick={() => setTool(2)}
-          className={`border px-3 py-2 text-xs ${
-            tool === 2
-              ? "bg-[#48494b] text-[#e3e5e4]"
-              : "bg-[#e3e5e4] text-[#48494b]"
-          }`}
+          className="border px-3 py-2 text-xs"
+          style={tool === 2 ? activeButtonStyle : inactiveButtonStyle}
         >
           LIGHT
         </button>
 
         <button
           onClick={() => setTool(0)}
-          className={`border px-3 py-2 text-xs ${
-            tool === 0
-              ? "bg-[#48494b] text-[#e3e5e4]"
-              : "bg-[#e3e5e4] text-[#48494b]"
-          }`}
+          className="border px-3 py-2 text-xs"
+          style={tool === 0 ? activeButtonStyle : inactiveButtonStyle}
         >
           ERASER
         </button>
@@ -294,19 +315,26 @@ export default function StickerEditor({
       <div className="mb-3 grid grid-cols-2 gap-2">
         <button
           onClick={clearAll}
-          className="border bg-[#48494b] px-3 py-2 text-xs text-[#e3e5e4]"
+          className="border px-3 py-2 text-xs"
+          style={activeButtonStyle}
         >
           CLEAR
         </button>
+
         <button
           onClick={invertAll}
-          className="border bg-[#48494b] px-3 py-2 text-xs text-[#e3e5e4]"
+          className="border px-3 py-2 text-xs"
+          style={activeButtonStyle}
         >
           INVERT
         </button>
       </div>
 
-      <div ref={wrapRef} className="mb-3 overflow-auto border bg-white p-2">
+      <div
+        ref={wrapRef}
+        className="mb-3 overflow-auto border p-2"
+        style={editorWrapStyle}
+      >
         <canvas
           ref={canvasRef}
           onPointerDown={(e) => {
@@ -344,8 +372,7 @@ export default function StickerEditor({
       </div>
 
       <div className="text-xs">
-        TOOL: {tool === 1 ? "DARK" : tool === 2 ? "LIGHT" : "ERASER"} ·
-        PALETTE: {activePalette.name}
+        TOOL: {tool === 1 ? "DARK" : tool === 2 ? "LIGHT" : "ERASER"}
       </div>
     </div>
   );
