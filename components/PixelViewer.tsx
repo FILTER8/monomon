@@ -6,13 +6,25 @@ import StickerEditor from "@/components/StickerEditor";
 
 const TOTAL_TOKENS = 10000;
 
-const PIXEL_ON_HEX = "#48494b";
-const PIXEL_OFF_HEX = "#e3e5e4";
-
 const TARGET_EXPORT_SIZE = 720;
 const SOURCE_SIZE = 36;
 const MAX_FRAME = 12;
 const MAX_PREVIEW_SCALE = 10;
+
+const PALETTES = {
+  normie: {
+    name: "Normie",
+    on: "#48494b",
+    off: "#e3e5e4",
+  },
+  eth: {
+    name: "Eth",
+    on: "#5c6fa8",
+    off: "#e3e5e4",
+  },
+} as const;
+
+type PaletteKey = keyof typeof PALETTES;
 
 type StickerData = {
   width: number;
@@ -133,19 +145,21 @@ function drawBitmap(
   ctx: CanvasRenderingContext2D,
   bits: Uint8Array,
   bitmapSize: number,
-  canvasSize: number
+  canvasSize: number,
+  palette: PaletteKey
 ) {
   const scale = canvasSize / bitmapSize;
+  const colors = PALETTES[palette];
 
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.clearRect(0, 0, canvasSize, canvasSize);
-  ctx.fillStyle = PIXEL_OFF_HEX;
+  ctx.fillStyle = colors.off;
   ctx.fillRect(0, 0, canvasSize, canvasSize);
 
   for (let y = 0; y < bitmapSize; y++) {
     for (let x = 0; x < bitmapSize; x++) {
       const value = bits[y * bitmapSize + x];
-      ctx.fillStyle = value ? PIXEL_ON_HEX : PIXEL_OFF_HEX;
+      ctx.fillStyle = value ? colors.on : colors.off;
       ctx.fillRect(
         Math.round(x * scale),
         Math.round(y * scale),
@@ -293,6 +307,7 @@ export default function PixelViewer() {
   const [bayer, setBayer] = useState(0);
   const [invert, setInvert] = useState(false);
   const [frame, setFrame] = useState(4);
+  const [palette, setPalette] = useState<PaletteKey>("normie");
 
   const [embeddedPng, setEmbeddedPng] = useState<string | null>(null);
   const [baseRendered, setBaseRendered] = useState<{
@@ -475,8 +490,8 @@ export default function PixelViewer() {
     canvas.height = internalSize;
 
     ctx.imageSmoothingEnabled = false;
-    drawBitmap(ctx, rendered.bits, rendered.size, internalSize);
-  }, [rendered]);
+    drawBitmap(ctx, rendered.bits, rendered.size, internalSize, palette);
+  }, [rendered, palette]);
 
   function updateStickerFromPointer(clientX: number, clientY: number) {
     if (!previewCanvasRef.current || !rendered || !parsedSticker) return;
@@ -504,12 +519,12 @@ export default function PixelViewer() {
     canvas.height = exportSize;
 
     ctx.imageSmoothingEnabled = false;
-    drawBitmap(ctx, rendered.bits, rendered.size, exportSize);
+    drawBitmap(ctx, rendered.bits, rendered.size, exportSize, palette);
 
     const url = canvas.toDataURL("image/png");
     const a = document.createElement("a");
     a.href = url;
-    a.download = `cc0mon-${tokenId}${
+    a.download = `cc0mon-${tokenId}-${palette}${
       invert ? "-inverse" : ""
     }-${exportSize}x${exportSize}.png`;
     a.click();
@@ -599,15 +614,26 @@ export default function PixelViewer() {
               />
             </label>
 
-            <label className="flex items-center gap-3 border bg-[#e3e5e4] p-2 text-xs">
-              <input
-                type="checkbox"
-                checked={invert}
-                onChange={(e) => setInvert(e.target.checked)}
-                className="pixel-checkbox"
-              />
-              <span>INVERSE</span>
-            </label>
+            <div className="grid grid-cols-2 gap-2">
+              <label className="flex items-center gap-3 border bg-[#e3e5e4] p-2 text-xs">
+                <input
+                  type="checkbox"
+                  checked={invert}
+                  onChange={(e) => setInvert(e.target.checked)}
+                  className="pixel-checkbox"
+                />
+                <span>INVERSE</span>
+              </label>
+
+              <button
+                onClick={() =>
+                  setPalette((prev) => (prev === "normie" ? "eth" : "normie"))
+                }
+                className="border bg-[#48494b] px-3 py-2 text-xs text-[#e3e5e4]"
+              >
+                PALETTE: {palette === "normie" ? "NORMIE" : "ETH"}
+              </button>
+            </div>
 
             {rendered && parsedSticker && (
               <>
@@ -652,7 +678,9 @@ export default function PixelViewer() {
         </div>
 
         <div className="order-1 border bg-[#e3e5e4] p-3 lg:order-2">
-          <div className="mb-3 text-center text-sm">PREVIEW</div>
+          <div className="mb-3 text-center text-sm">
+            PREVIEW · {PALETTES[palette].name}
+          </div>
           <div
             ref={previewWrapRef}
             className="flex w-full items-center justify-center overflow-hidden"
@@ -675,7 +703,7 @@ export default function PixelViewer() {
                 maxWidth: "100%",
                 aspectRatio: "1 / 1",
                 imageRendering: "pixelated",
-                backgroundColor: PIXEL_OFF_HEX,
+                backgroundColor: PALETTES[palette].off,
                 display: "block",
                 touchAction: "none",
                 cursor: parsedSticker ? "grab" : "default",
@@ -688,6 +716,7 @@ export default function PixelViewer() {
           <StickerEditor
             initialWidth={8}
             initialHeight={5}
+            palette={palette}
             onExport={(json) => setStickerJson(json)}
           />
         </div>

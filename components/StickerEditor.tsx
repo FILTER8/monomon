@@ -2,14 +2,27 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 
-const PIXEL_DARK_HEX = "#48494b";
 const PIXEL_LIGHT_HEX = "#e3e5e4";
 const PREVIEW_BG_HEX = "#ffffff";
 const GRID_LINE_HEX = "#48494b";
 
+const PALETTES = {
+  normie: {
+    name: "Normie",
+    dark: "#48494b",
+  },
+  eth: {
+    name: "Eth",
+    dark: "#5c6fa8",
+  },
+} as const;
+
+type PaletteKey = keyof typeof PALETTES;
+
 type Props = {
   initialWidth?: number;
   initialHeight?: number;
+  palette: PaletteKey;
   onExport?: (json: string) => void;
 };
 
@@ -43,6 +56,7 @@ function clamp(value: number, min: number, max: number) {
 export default function StickerEditor({
   initialWidth = 8,
   initialHeight = 8,
+  palette,
   onExport,
 }: Props) {
   const [width, setWidth] = useState(initialWidth);
@@ -59,6 +73,8 @@ export default function StickerEditor({
   const pointerIdRef = useRef<number | null>(null);
 
   const [cssCellSize, setCssCellSize] = useState(24);
+
+  const activePalette = PALETTES[palette];
 
   const grid = useMemo(() => {
     return resizeGrid(baseGrid, width, height);
@@ -132,7 +148,7 @@ export default function StickerEditor({
         const value = grid[y]?.[x] ?? 0;
 
         if (value === 1) {
-          ctx.fillStyle = PIXEL_DARK_HEX;
+          ctx.fillStyle = activePalette.dark;
           ctx.fillRect(
             x * cssCellSize,
             y * cssCellSize,
@@ -159,7 +175,7 @@ export default function StickerEditor({
         );
       }
     }
-  }, [grid, width, height, cssCellSize]);
+  }, [grid, width, height, cssCellSize, activePalette]);
 
   function getCellFromPointer(clientX: number, clientY: number) {
     const canvas = canvasRef.current;
@@ -190,9 +206,8 @@ export default function StickerEditor({
     const cell = getCellFromPointer(clientX, clientY);
     if (!cell) return;
 
-    const nextValue: 0 | 1 | 2 = tool;
-    dragPaintValueRef.current = nextValue;
-    paintCell(cell.x, cell.y, nextValue);
+    dragPaintValueRef.current = tool;
+    paintCell(cell.x, cell.y, tool);
   }
 
   function dragPaint(clientX: number, clientY: number) {
@@ -217,6 +232,8 @@ export default function StickerEditor({
   return (
     <div className="border bg-[#e3e5e4] p-3">
       <div className="mb-3 text-sm">STICKER EDITOR</div>
+
+      <div className="mb-2 text-xs">PALETTE: {activePalette.name}</div>
 
       <div className="mb-3 grid gap-2 sm:grid-cols-2">
         <input
@@ -327,7 +344,8 @@ export default function StickerEditor({
       </div>
 
       <div className="text-xs">
-        TOOL: {tool === 1 ? "DARK" : tool === 2 ? "LIGHT" : "ERASER"}
+        TOOL: {tool === 1 ? "DARK" : tool === 2 ? "LIGHT" : "ERASER"} ·
+        PALETTE: {activePalette.name}
       </div>
     </div>
   );
