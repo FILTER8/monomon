@@ -2,13 +2,14 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { decodeSvgDataUri } from "@/lib/svg-utils";
-import StickerEditor from "@/components/StickerEditor";
 
 const TOTAL_TOKENS = 10000;
 const TARGET_EXPORT_SIZE = 720;
 const SOURCE_SIZE = 36;
 const MAX_FRAME = 12;
-const MAX_PREVIEW_SCALE = 10;
+const DEFAULT_PREVIEW_SCALE = 10;
+const MIN_PREVIEW_SCALE = 6;
+const MAX_PREVIEW_SCALE = 24;
 
 const THEMES = {
   normie: { name: "Normie" },
@@ -16,10 +17,10 @@ const THEMES = {
 } as const;
 
 type ThemeKey = keyof typeof THEMES;
+type EditMode = "move" | "draw-dark" | "draw-light" | "erase";
 
-type StickerData = {
-  width: number;
-  height: number;
+type OverlayData = {
+  size: number;
   pixels: string[];
 };
 
@@ -55,15 +56,111 @@ function getThemeColors() {
     return {
       on: "#48494b",
       off: "#e3e5e4",
+      border: "#48494b",
+      oppositeOn: "#5a6da8",
     };
   }
 
   const styles = getComputedStyle(document.documentElement);
+  const currentTheme = document.documentElement.dataset.theme as ThemeKey | undefined;
 
   return {
     on: styles.getPropertyValue("--pixel-on").trim() || "#48494b",
     off: styles.getPropertyValue("--pixel-off").trim() || "#e3e5e4",
+    border: styles.getPropertyValue("--pixel-border").trim() || "#48494b",
+    oppositeOn: currentTheme === "eth" ? "#48494b" : "#5a6da8",
   };
+}
+
+function makeOverlay(size: number): OverlayData {
+  return {
+    size,
+    pixels: Array.from({ length: size }, () => "0".repeat(size)),
+  };
+}
+
+function resizeOverlay(prev: OverlayData | null, size: number): OverlayData {
+  if (!prev) return makeOverlay(size);
+  if (prev.size === size) return prev;
+
+  const pixels = Array.from({ length: size }, (_, y) =>
+    Array.from({ length: size }, (_, x) => prev.pixels[y]?.[x] ?? "0").join("")
+  );
+
+  return { size, pixels };
+}
+
+function setOverlayCell(
+  overlay: OverlayData,
+  x: number,
+  y: number,
+  value: "0" | "1" | "2"
+): OverlayData {
+  if (x < 0 || y < 0 || x >= overlay.size || y >= overlay.size) {
+    return overlay;
+  }
+
+  const row = overlay.pixels[y];
+  if (!row) return overlay;
+  if (row[x] === value) return overlay;
+
+  const nextRow = `${row.slice(0, x)}${value}${row.slice(x + 1)}`;
+  const nextPixels = overlay.pixels.slice();
+  nextPixels[y] = nextRow;
+
+  return {
+    ...overlay,
+    pixels: nextPixels,
+  };
+}
+
+function clearOverlay(overlay: OverlayData): OverlayData {
+  return makeOverlay(overlay.size);
+}
+
+function invertOverlay(overlay: OverlayData): OverlayData {
+  return {
+    ...overlay,
+    pixels: overlay.pixels.map((row) =>
+      row
+        .split("")
+        .map((value) => (value === "1" ? "2" : value === "2" ? "1" : "0"))
+        .join("")
+    ),
+  };
+}
+
+function shiftOverlay(overlay: OverlayData, dx: number, dy: number): OverlayData {
+  if (dx === 0 && dy === 0) return overlay;
+
+  const size = overlay.size;
+  const next = makeOverlay(size);
+
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      const sourceX = x - dx;
+      const sourceY = y - dy;
+
+      if (
+        sourceX < 0 ||
+        sourceY < 0 ||
+        sourceX >= size ||
+        sourceY >= size
+      ) {
+        continue;
+      }
+
+      const value = overlay.pixels[sourceY]?.[sourceX] ?? "0";
+      if (value === "0") continue;
+
+      next.pixels[y] =
+        next.pixels[y].slice(0, x) +
+        value +
+        next.pixels[y].slice(x + 1);
+    }
+  }
+
+  return next;
 }
 
 function applyThresholdTo36x36(
@@ -176,6 +273,88 @@ function drawBitmap(
   }
 }
 
+function drawOverlay(
+  ctx: CanvasRenderingContext2D,
+  overlay: OverlayData,
+  canvasSize: number,
+  editMode: EditMode,
+  showGrid: boolean,
+  invert: boolean
+) {
+  const colors = getThemeColors();
+  const scale = canvasSize / overlay.size;
+  const darkColor = editMode === "move" ? colors.on : colors.oppositeOn;
+  const lightColor = colors.off;
+
+  for (let y = 0; y < overlay.size; y++) {
+    for (let x = 0; x < overlay.size; x++) {
+      const value = overlay.pixels[y]?.[x];
+      if (!value || value === "0") continue;
+
+      let fillColor = darkColor;
+
+      if (value === "1") {
+        fillColor = invert ? lightColor : darkColor;
+      } else if (value === "2") {
+        fillColor = invert ? darkColor : lightColor;
+      }
+
+      ctx.fillStyle = fillColor;
+      ctx.fillRect(
+        Math.round(x * scale),
+        Math.round(y * scale),
+        Math.ceil(scale),
+        Math.ceil(scale)
+      );
+    }
+  }
+
+  if (!showGrid) return;
+
+  ctx.strokeStyle = editMode === "move" ? colors.border : colors.oppositeOn;
+  ctx.lineWidth = 1;
+
+  for (let y = 0; y <= overlay.size; y++) {
+    const py = Math.round(y * scale);
+    ctx.beginPath();
+    ctx.moveTo(0, py);
+    ctx.lineTo(canvasSize, py);
+    ctx.stroke();
+  }
+
+  for (let x = 0; x <= overlay.size; x++) {
+    const px = Math.round(x * scale);
+    ctx.beginPath();
+    ctx.moveTo(px, 0);
+    ctx.lineTo(px, canvasSize);
+    ctx.stroke();
+  }
+}
+
+function applyOverlayToBits(
+  baseBits: Uint8Array,
+  baseSize: number,
+  overlay: OverlayData,
+  invert: boolean
+) {
+  const out = new Uint8Array(baseBits);
+
+  for (let y = 0; y < Math.min(baseSize, overlay.size); y++) {
+    for (let x = 0; x < Math.min(baseSize, overlay.size); x++) {
+      const value = overlay.pixels[y]?.[x];
+      if (!value || value === "0") continue;
+
+      if (value === "1") {
+        out[y * baseSize + x] = invert ? 0 : 1;
+      } else if (value === "2") {
+        out[y * baseSize + x] = invert ? 1 : 0;
+      }
+    }
+  }
+
+  return out;
+}
+
 function getCleanExportSize(bitmapSize: number) {
   const scale = Math.max(1, Math.round(TARGET_EXPORT_SIZE / bitmapSize));
   return bitmapSize * scale;
@@ -224,83 +403,14 @@ async function cc0monImageToBits(
   };
 }
 
-function parseStickerJson(text: string): StickerData | null {
-  try {
-    const parsed = JSON.parse(text) as StickerData;
-
-    if (
-      !parsed ||
-      typeof parsed.width !== "number" ||
-      typeof parsed.height !== "number" ||
-      !Array.isArray(parsed.pixels)
-    ) {
-      return null;
-    }
-
-    if (parsed.pixels.length !== parsed.height) {
-      return null;
-    }
-
-    for (const row of parsed.pixels) {
-      if (typeof row !== "string" || row.length !== parsed.width) {
-        return null;
-      }
-      if (!/^[012]+$/.test(row)) {
-        return null;
-      }
-    }
-
-    return parsed;
-  } catch {
-    return null;
-  }
-}
-
-function applySticker(
-  baseBits: Uint8Array,
-  baseSize: number,
-  sticker: StickerData | null,
-  stickerX: number,
-  stickerY: number,
-  invert: boolean
-) {
-  if (!sticker) return baseBits;
-
-  const out = new Uint8Array(baseBits);
-
-  for (let y = 0; y < sticker.height; y++) {
-    for (let x = 0; x < sticker.width; x++) {
-      const value = sticker.pixels[y][x];
-      if (value === "0") continue;
-
-      const targetX = stickerX + x;
-      const targetY = stickerY + y;
-
-      if (
-        targetX < 0 ||
-        targetY < 0 ||
-        targetX >= baseSize ||
-        targetY >= baseSize
-      ) {
-        continue;
-      }
-
-      if (value === "1") {
-        out[targetY * baseSize + targetX] = invert ? 0 : 1;
-      } else if (value === "2") {
-        out[targetY * baseSize + targetX] = invert ? 1 : 0;
-      }
-    }
-  }
-
-  return out;
-}
-
 export default function PixelViewer() {
   const previewCanvasRef = useRef<HTMLCanvasElement>(null);
   const previewWrapRef = useRef<HTMLDivElement>(null);
   const exportCanvasRef = useRef<HTMLCanvasElement>(null);
   const currentTokenIdRef = useRef<number | null>(null);
+  const pointerIdRef = useRef<number | null>(null);
+  const moveStartCellRef = useRef<{ x: number; y: number } | null>(null);
+  const moveAppliedRef = useRef<{ dx: number; dy: number } | null>(null);
 
   const [tokenId, setTokenId] = useState<number | null>(null);
   const [tokenInput, setTokenInput] = useState("1");
@@ -318,22 +428,13 @@ export default function PixelViewer() {
     size: number;
   } | null>(null);
 
+  const [overlay, setOverlay] = useState<OverlayData | null>(null);
+  const [editMode, setEditMode] = useState<EditMode>("draw-dark");
+  const [showGrid, setShowGrid] = useState(false);
+  const [previewScale, setPreviewScale] = useState(DEFAULT_PREVIEW_SCALE);
+
   const [previewCssSize, setPreviewCssSize] = useState(320);
   const [error, setError] = useState<string | null>(null);
-
-  const [stickerJson, setStickerJson] = useState(`{
-  "width": 8,
-  "height": 5,
-  "pixels": [
-    "00000000",
-    "01100110",
-    "01222100",
-    "01011100",
-    "01100110"
-  ]
-}`);
-  const [stickerX, setStickerX] = useState(0);
-  const [stickerY, setStickerY] = useState(0);
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
@@ -351,31 +452,25 @@ export default function PixelViewer() {
     borderColor: "var(--pixel-border)",
   };
 
+  const inactiveButtonStyle: React.CSSProperties = {
+    backgroundColor: "var(--pixel-surface)",
+    color: "var(--pixel-on)",
+    borderColor: "var(--pixel-border)",
+  };
+
   const previewFrameStyle: React.CSSProperties = {
     backgroundColor: "var(--pixel-off)",
     borderColor: "var(--pixel-border)",
   };
 
-  const parsedSticker = useMemo(
-    () => parseStickerJson(stickerJson),
-    [stickerJson]
-  );
-
   const rendered = useMemo(() => {
-    if (!baseRendered) return null;
+    if (!baseRendered || !overlay) return null;
 
     return {
       size: baseRendered.size,
-      bits: applySticker(
-        baseRendered.bits,
-        baseRendered.size,
-        parsedSticker,
-        stickerX,
-        stickerY,
-        invert
-      ),
+      bits: applyOverlayToBits(baseRendered.bits, baseRendered.size, overlay, invert),
     };
-  }, [baseRendered, parsedSticker, stickerX, stickerY, invert]);
+  }, [baseRendered, overlay, invert]);
 
   const loadToken = useCallback(async (nextTokenId?: number) => {
     const id =
@@ -450,6 +545,7 @@ export default function PixelViewer() {
 
         if (!cancelled) {
           setBaseRendered(next);
+          setOverlay((prev) => resizeOverlay(prev, next.size));
         }
       } catch (err) {
         if (!cancelled) {
@@ -468,25 +564,14 @@ export default function PixelViewer() {
   }, [embeddedPng, threshold, bayer, invert, frame]);
 
   useEffect(() => {
-    if (!baseRendered || !parsedSticker) return;
-
-    setStickerX((prev) =>
-      clamp(prev, 0, Math.max(0, baseRendered.size - parsedSticker.width))
-    );
-    setStickerY((prev) =>
-      clamp(prev, 0, Math.max(0, baseRendered.size - parsedSticker.height))
-    );
-  }, [baseRendered, parsedSticker]);
-
-  useEffect(() => {
     function updatePreviewSize() {
       const wrap = previewWrapRef.current;
-      const current = rendered;
+      const current = baseRendered;
 
       if (!wrap || !current) return;
 
-      const natural = current.size * MAX_PREVIEW_SCALE;
-      const mobileMax = Math.min(window.innerWidth - 32, 420);
+      const natural = current.size * previewScale;
+      const mobileMax = Math.min(window.innerWidth - 32, 800);
       const available = Math.max(
         180,
         Math.floor(Math.min(wrap.clientWidth - 8, mobileMax))
@@ -501,35 +586,85 @@ export default function PixelViewer() {
     return () => {
       window.removeEventListener("resize", updatePreviewSize);
     };
-  }, [rendered]);
+  }, [baseRendered, previewScale]);
 
   useEffect(() => {
-    if (!rendered || !previewCanvasRef.current) return;
+    if (!baseRendered || !overlay || !previewCanvasRef.current) return;
 
     const canvas = previewCanvasRef.current;
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
-    const internalSize = rendered.size * MAX_PREVIEW_SCALE;
+    const internalSize = baseRendered.size * previewScale;
 
     canvas.width = internalSize;
     canvas.height = internalSize;
 
     ctx.imageSmoothingEnabled = false;
-    drawBitmap(ctx, rendered.bits, rendered.size, internalSize);
-  }, [rendered, theme]);
+    drawBitmap(ctx, baseRendered.bits, baseRendered.size, internalSize);
+    drawOverlay(ctx, overlay, internalSize, editMode, showGrid, invert);
+  }, [baseRendered, overlay, editMode, showGrid, theme, invert, previewScale]);
 
-  function updateStickerFromPointer(clientX: number, clientY: number) {
-    if (!previewCanvasRef.current || !rendered || !parsedSticker) return;
+  function getBitmapCellFromPointer(clientX: number, clientY: number) {
+    if (!previewCanvasRef.current || !baseRendered) return null;
 
     const rect = previewCanvasRef.current.getBoundingClientRect();
-    const bitmapSize = rendered.size;
+    const bitmapSize = baseRendered.size;
 
     const x = Math.floor(((clientX - rect.left) / rect.width) * bitmapSize);
     const y = Math.floor(((clientY - rect.top) / rect.height) * bitmapSize);
 
-    setStickerX(clamp(x, 0, Math.max(0, bitmapSize - parsedSticker.width)));
-    setStickerY(clamp(y, 0, Math.max(0, bitmapSize - parsedSticker.height)));
+    if (x < 0 || y < 0 || x >= bitmapSize || y >= bitmapSize) return null;
+
+    return { x, y };
+  }
+
+  function paintAt(clientX: number, clientY: number) {
+    const cell = getBitmapCellFromPointer(clientX, clientY);
+    if (!cell || !overlay) return;
+
+    const nextValue: "0" | "1" | "2" =
+      editMode === "draw-dark"
+        ? "1"
+        : editMode === "draw-light"
+        ? "2"
+        : "0";
+
+    setOverlay((prev) =>
+      prev ? setOverlayCell(prev, cell.x, cell.y, nextValue) : prev
+    );
+  }
+
+  function beginMove(clientX: number, clientY: number) {
+    const cell = getBitmapCellFromPointer(clientX, clientY);
+    if (!cell) return;
+
+    moveStartCellRef.current = cell;
+    moveAppliedRef.current = { dx: 0, dy: 0 };
+  }
+
+  function continueMove(clientX: number, clientY: number) {
+    const cell = getBitmapCellFromPointer(clientX, clientY);
+    const startCell = moveStartCellRef.current;
+    const applied = moveAppliedRef.current;
+
+    if (!cell || !startCell || !applied) return;
+
+    const totalDx = cell.x - startCell.x;
+    const totalDy = cell.y - startCell.y;
+
+    const stepDx = totalDx - applied.dx;
+    const stepDy = totalDy - applied.dy;
+
+    if (stepDx === 0 && stepDy === 0) return;
+
+    setOverlay((prev) => (prev ? shiftOverlay(prev, stepDx, stepDy) : prev));
+    moveAppliedRef.current = { dx: totalDx, dy: totalDy };
+  }
+
+  function endMove() {
+    moveStartCellRef.current = null;
+    moveAppliedRef.current = null;
   }
 
   function exportPng() {
@@ -558,7 +693,7 @@ export default function PixelViewer() {
 
   return (
     <div className="mx-auto max-w-6xl">
-      <div className="grid gap-4 lg:grid-cols-[280px_minmax(0,1fr)_320px]">
+      <div className="grid gap-4 lg:grid-cols-[280px_minmax(0,1fr)]">
         <div className="order-2 border p-3 lg:order-1" style={panelStyle}>
           <div className="space-y-3">
             <div className="border p-2" style={panelStyle}>
@@ -643,6 +778,18 @@ export default function PixelViewer() {
               />
             </label>
 
+            <label className="block space-y-2">
+              <span className="text-xs">ZOOM: {previewScale}x</span>
+              <input
+                type="range"
+                min={MIN_PREVIEW_SCALE}
+                max={MAX_PREVIEW_SCALE}
+                step="1"
+                value={previewScale}
+                onChange={(e) => setPreviewScale(Number(e.target.value))}
+              />
+            </label>
+
             <div className="grid grid-cols-2 gap-2">
               <label
                 className="flex items-center gap-3 border p-2 text-xs"
@@ -668,41 +815,66 @@ export default function PixelViewer() {
               </button>
             </div>
 
-            {rendered && parsedSticker && (
-              <>
-                <label className="block space-y-2">
-                  <span className="text-xs">STICKER X: {stickerX}</span>
-                  <input
-                    type="range"
-                    min="0"
-                    max={Math.max(0, rendered.size - parsedSticker.width)}
-                    step="1"
-                    value={clamp(
-                      stickerX,
-                      0,
-                      Math.max(0, rendered.size - parsedSticker.width)
-                    )}
-                    onChange={(e) => setStickerX(Number(e.target.value))}
-                  />
-                </label>
+            <div className="border p-2" style={panelStyle}>
+              <div className="mb-2 text-xs">TOOLS</div>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  onClick={() => setEditMode("move")}
+                  className="border px-3 py-2 text-xs"
+                  style={editMode === "move" ? buttonStyle : inactiveButtonStyle}
+                >
+                  MOVE
+                </button>
 
-                <label className="block space-y-2">
-                  <span className="text-xs">STICKER Y: {stickerY}</span>
-                  <input
-                    type="range"
-                    min="0"
-                    max={Math.max(0, rendered.size - parsedSticker.height)}
-                    step="1"
-                    value={clamp(
-                      stickerY,
-                      0,
-                      Math.max(0, rendered.size - parsedSticker.height)
-                    )}
-                    onChange={(e) => setStickerY(Number(e.target.value))}
-                  />
-                </label>
-              </>
-            )}
+                <button
+                  onClick={() => setShowGrid((prev) => !prev)}
+                  className="border px-3 py-2 text-xs"
+                  style={showGrid ? buttonStyle : inactiveButtonStyle}
+                >
+                  GRID: {showGrid ? "ON" : "OFF"}
+                </button>
+
+                <button
+                  onClick={() => setEditMode("draw-dark")}
+                  className="border px-3 py-2 text-xs"
+                  style={editMode === "draw-dark" ? buttonStyle : inactiveButtonStyle}
+                >
+                  DARK
+                </button>
+
+                <button
+                  onClick={() => setEditMode("draw-light")}
+                  className="border px-3 py-2 text-xs"
+                  style={editMode === "draw-light" ? buttonStyle : inactiveButtonStyle}
+                >
+                  LIGHT
+                </button>
+
+                <button
+                  onClick={() => setEditMode("erase")}
+                  className="border px-3 py-2 text-xs"
+                  style={editMode === "erase" ? buttonStyle : inactiveButtonStyle}
+                >
+                  ERASE
+                </button>
+
+                <button
+                  onClick={() => setOverlay((prev) => (prev ? invertOverlay(prev) : prev))}
+                  className="border px-3 py-2 text-xs"
+                  style={buttonStyle}
+                >
+                  INVERT DRAW
+                </button>
+
+                <button
+                  onClick={() => setOverlay((prev) => (prev ? clearOverlay(prev) : prev))}
+                  className="border px-3 py-2 text-xs"
+                  style={buttonStyle}
+                >
+                  CLEAR DRAW
+                </button>
+              </div>
+            </div>
 
             {error && (
               <div className="border p-2 text-xs" style={panelStyle}>
@@ -714,47 +886,75 @@ export default function PixelViewer() {
 
         <div className="order-1 border p-3 lg:order-2" style={panelStyle}>
           <div className="mb-3 text-center text-sm">
-            PREVIEW · {THEMES[theme].name}
+            PREVIEW · {THEMES[theme].name} ·{" "}
+            {editMode === "move"
+              ? "MOVE"
+              : editMode === "draw-dark"
+              ? "DRAW DARK"
+              : editMode === "draw-light"
+              ? "DRAW LIGHT"
+              : "ERASE"}
           </div>
 
           <div
             ref={previewWrapRef}
-            className="flex w-full items-center justify-center overflow-hidden"
+            className="flex w-full items-center justify-center overflow-auto"
           >
             <canvas
               ref={previewCanvasRef}
               onPointerDown={(e) => {
                 e.preventDefault();
-                updateStickerFromPointer(e.clientX, e.clientY);
+                pointerIdRef.current = e.pointerId;
+                e.currentTarget.setPointerCapture(e.pointerId);
+
+                if (editMode === "move") {
+                  beginMove(e.clientX, e.clientY);
+                } else {
+                  paintAt(e.clientX, e.clientY);
+                }
               }}
               onPointerMove={(e) => {
-                if ((e.buttons & 1) !== 1) return;
+                if (pointerIdRef.current !== e.pointerId) return;
                 e.preventDefault();
-                updateStickerFromPointer(e.clientX, e.clientY);
+
+                if (editMode === "move") {
+                  continueMove(e.clientX, e.clientY);
+                } else {
+                  paintAt(e.clientX, e.clientY);
+                }
+              }}
+              onPointerUp={(e) => {
+                if (pointerIdRef.current !== e.pointerId) return;
+                pointerIdRef.current = null;
+                endMove();
+
+                if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+                  e.currentTarget.releasePointerCapture(e.pointerId);
+                }
+              }}
+              onPointerCancel={(e) => {
+                if (pointerIdRef.current !== e.pointerId) return;
+                pointerIdRef.current = null;
+                endMove();
+
+                if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+                  e.currentTarget.releasePointerCapture(e.pointerId);
+                }
               }}
               className="border"
               style={{
                 ...previewFrameStyle,
                 width: `${previewCssSize}px`,
                 height: `${previewCssSize}px`,
-                maxWidth: "100%",
+                maxWidth: "none",
                 aspectRatio: "1 / 1",
                 imageRendering: "pixelated",
                 display: "block",
                 touchAction: "none",
-                cursor: parsedSticker ? "grab" : "default",
+                cursor: editMode === "move" ? "grab" : "crosshair",
               }}
             />
           </div>
-        </div>
-
-        <div className="order-3 space-y-4 lg:max-w-[320px]">
-          <StickerEditor
-            initialWidth={8}
-            initialHeight={5}
-            theme={theme}
-            onExport={(json) => setStickerJson(json)}
-          />
         </div>
       </div>
 
